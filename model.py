@@ -29,7 +29,7 @@ class VAE(object):
                gamma=100.0,
                capacity_limit=25.0,
                capacity_change_duration=100000,
-               learning_rate=5e-4):
+               learning_rate=1e-6):
     self.gamma = gamma
     self.capacity_limit = capacity_limit
     self.capacity_change_duration = capacity_change_duration
