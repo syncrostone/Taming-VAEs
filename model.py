@@ -175,6 +175,8 @@ class VAE(object):
     with tf.variable_scope("vae"):
       self.z_mean, self.z_log_sigma_sq = self._create_recognition_network(self.x)
 
+      #We want mean to be 0 and variance 1.
+      print("z_mean: " + self.z_mean + " z_log_sigma_sq: " + self.z_log_sigma_sq)
       # Draw one sample z from Gaussian distribution
       # z = mu + sigma * epsilon
       self.z = self._sample_z(self.z_mean, self.z_log_sigma_sq)

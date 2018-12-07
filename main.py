@@ -43,7 +43,7 @@ def train(sess,
   
   # Training cycle
   for epoch in range(flags.epoch_size):
-    # Shuffle image indices
+    # Shuffle image indices -- TODO(JASMINE): why?
     random.shuffle(indices)
     
     avg_cost = 0.0
