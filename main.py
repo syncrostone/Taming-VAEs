@@ -19,10 +19,11 @@ tf.app.flags.DEFINE_float("capacity_limit", 20.0,
                           "encoding capacity limit param for latent loss")
 tf.app.flags.DEFINE_integer("capacity_change_duration", 100000,
                             "encoding capacity change duration")
-tf.app.flags.DEFINE_float("learning_rate", 5e-4, "learning rate")
+tf.app.flags.DEFINE_float("learning_rate", 1e-6, "learning rate")
 tf.app.flags.DEFINE_string("checkpoint_dir", "checkpoints", "checkpoint directory")
 tf.app.flags.DEFINE_string("log_file", "./log", "log file directory")
 tf.app.flags.DEFINE_boolean("training", True, "training or not")
+tf.app.flags.DEFINE_float("alpha", .99, "constraint moving average parameter")
 
 flags = tf.app.flags.FLAGS
 
@@ -144,7 +145,8 @@ def main(argv):
   model = VAE(gamma=flags.gamma,
               capacity_limit=flags.capacity_limit,
               capacity_change_duration=flags.capacity_change_duration,
-              learning_rate=flags.learning_rate)
+              learning_rate=flags.learning_rate,
+              alpha = flags.alpha)
   
   sess.run(tf.global_variables_initializer())
 

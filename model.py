@@ -23,13 +23,14 @@ def conv_initializer(kernel_width, kernel_height, input_channels, dtype=tf.float
 
 
 class VAE(object):
-  """ Beta Variational Auto Encoder. """
+  """ Beta Variational Auto Encoder."""
   
   def __init__(self,
                gamma=100.0,
                capacity_limit=25.0,
                capacity_change_duration=100000,
-               learning_rate=1e-6):
+               learning_rate=1e-6
+               alpha = 0.99):
     self.gamma = gamma
     self.capacity_limit = capacity_limit
     self.capacity_change_duration = capacity_change_duration
