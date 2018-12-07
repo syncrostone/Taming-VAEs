@@ -21,7 +21,7 @@ class DataManagerTest(unittest.TestCase):
   
   def test_load(self):
     # sample size should be 737280
-    self.assertEquals(self.manager.sample_size, 737280)
+    self.assertEqual(self.manager.sample_size, 737280)
 
   def test_get_image(self):
     # get first image
@@ -37,14 +37,14 @@ class DataManagerTest(unittest.TestCase):
     indices = [0,1,2]
     images = self.manager.get_images(indices)
     
-    self.assertEquals(len(images), 3)
+    self.assertEqual(len(images), 3)
     # image shpe should be flatten. (4096)
     self.assertTrue(images[0].shape == (4096,))
 
   def test_get_random_images(self):
     images = self.manager.get_random_images(3)
     
-    self.assertEquals(len(images), 3)
+    self.assertEqual(len(images), 3)
     self.assertTrue(images[0].shape == (4096,))
 
 if __name__ == '__main__':
