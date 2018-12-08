@@ -26,15 +26,19 @@ class VAE(object):
   """ Beta Variational Auto Encoder."""
   
   def __init__(self,
-               gamma=100.0,
-               capacity_limit=25.0,
-               capacity_change_duration=100000,
-               learning_rate=1e-6
-               alpha = 0.99):
-    self.gamma = gamma
-    self.capacity_limit = capacity_limit
-    self.capacity_change_duration = capacity_change_duration
+               beta=100.0,
+               learning_rate=1e-6,
+               alpha = 0.99,
+               kappa = 0.1,
+               lagrange_mult_param = .5
+               use_geco = True):
+    self.beta = beta
     self.learning_rate = learning_rate
+    self.alpha = alpha
+    self.kappa = kappa
+    self.lagrange_mult_param = .5
+    self.lagrange_mult = 1/beta # Initializing lagrangian as 1/beta since this cooresponds to 1/beta
+
     
     # Create autoencoder network
     self._create_network()
@@ -176,48 +180,54 @@ class VAE(object):
     with tf.variable_scope("vae"):
       self.z_mean, self.z_log_sigma_sq = self._create_recognition_network(self.x)
 
-      #We want mean to be 0 and variance 1.
-      print("z_mean: " + self.z_mean + " z_log_sigma_sq: " + self.z_log_sigma_sq)
       # Draw one sample z from Gaussian distribution
       # z = mu + sigma * epsilon
       self.z = self._sample_z(self.z_mean, self.z_log_sigma_sq)
+
       self.x_out_logit = self._create_generator_network(self.z)
       self.x_out = tf.nn.sigmoid(self.x_out_logit)
       
       
   def _create_loss_optimizer(self):
-    # Reconstruction loss
-    reconstr_loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.x,
-                                                            logits=self.x_out_logit)
-    reconstr_loss = tf.reduce_sum(reconstr_loss, 1)
-    self.reconstr_loss = tf.reduce_mean(reconstr_loss)
+    if not self.use_geco:
+      # Reconstruction loss
+      reconstr_loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.x,
+                                                              logits=self.x_out_logit)
+      reconstr_loss = tf.reduce_sum(reconstr_loss, 1)
+      self.reconstr_loss = tf.reduce_mean(reconstr_loss)
 
-    # Latent loss
-    latent_loss = -0.5 * tf.reduce_sum(1 + self.z_log_sigma_sq
-                                       - tf.square(self.z_mean)
-                                       - tf.exp(self.z_log_sigma_sq), 1)
-    self.latent_loss = tf.reduce_mean(latent_loss)
-    
-    # Encoding capcity
-    self.capacity = tf.placeholder(tf.float32, shape=[])
-    
-    # Loss with encoding capacity term
-    self.loss = self.reconstr_loss + self.gamma * tf.abs(self.latent_loss - self.capacity)
+      # Latent loss
+      latent_loss = -0.5 * tf.reduce_sum(1 + self.z_log_sigma_sq
+                                         - tf.square(self.z_mean)
+                                         - tf.exp(self.z_log_sigma_sq), 1)
+      self.latent_loss = tf.reduce_mean(latent_loss)
+      
+      # Loss term with beta scaling
+      self.loss = self.reconstr_loss + self.beta* tf.abs(self.latent_loss)
 
-    reconstr_loss_summary_op = tf.summary.scalar('reconstr_loss', self.reconstr_loss)
-    latent_loss_summary_op   = tf.summary.scalar('latent_loss',   self.latent_loss)
-    self.summary_op = tf.summary.merge([reconstr_loss_summary_op, latent_loss_summary_op])
+      reconstr_loss_summary_op = tf.summary.scalar('reconstr_loss', self.reconstr_loss)
+      latent_loss_summary_op   = tf.summary.scalar('latent_loss',   self.latent_loss)
+      self.summary_op = tf.summary.merge([reconstr_loss_summary_op, latent_loss_summary_op])
 
-    self.optimizer = tf.train.AdamOptimizer(
-      learning_rate=self.learning_rate).minimize(self.loss)
+      self.optimizer = tf.train.AdamOptimizer(
+        learning_rate=self.learning_rate).minimize(self.loss)
+    if self.use_geco:
+      #How do I get the expectation instead of my current actual???
+      self.reconstr_loss = tf.reduce_sum(tf.square(self.x - self.x_out)) - self.kappa**2
+      #How do I get the expectation instead of my current actual???
+      latent_loss = 
+      self.loss = self.kl_divergence + self.lagrange_mult * self.reconstr_loss
 
+  def reconstruction_error(self, sess, xs):
+    """Calculate reconstruction error as defined on page 8 of Taming VAEs"""
+    #z_mean, z_log_sigma_sq = self.transform(sess,xs)
+    #z_sample = self._sample_z(z_mean, z_log_sigma_sq)
 
-  def _calc_encoding_capacity(self, step):
-    if step > self.capacity_change_duration:
-      c = self.capacity_limit
-    else:
-      c = self.capacity_limit * (step / self.capacity_change_duration)
-    return c
+    reconstructed_z = sess.run(self.x_out, feed_dict = {self.x:xs})
+    print(reconstructed_z)
+    return (tf.reduce_sum(tf.square(xs - reconstructed_z)) - self.kappa**2)
+    #reconstructed_z = self.generate(sess, z_sample)
+    # return (tf.reduce_sum(tf.square(xs - reconstructed_z)) - self.kappa**2)
 
     
   def partial_fit(self, sess, xs, step):
@@ -225,14 +235,36 @@ class VAE(object):
     
     Return loss of mini-batch.
     """
-    c = self._calc_encoding_capacity(step)
+    if not self.use_geco:
+      _, reconstr_loss, latent_loss, summary_str = sess.run((self.optimizer,
+                                                             self.reconstr_loss,
+                                                             self.latent_loss,
+                                                             self.summary_op),
+                                                            feed_dict={
+                                                              self.x : xs
+                                                            })
+      return reconstr_loss, latent_loss, summary_str
+    if self.use_geco:
+      return geco_partial_fit(self, sess, xs, step)
+
+  def geco_partial_fit(self, sess, xs, step):
+    """Train model as described in Taming VAEs."""
+    C_curr = self.reconstruction_error(sess, xs)
+    if step == 0:
+      print("step is 0, initializing")
+      self.C_ma = C_curr
+    else:
+      self.C_ma = self.alpha * self.C_ma + (1 - self.alpha)*C_curr
+    C_curr = C_curr + tf.stop_gradient(self.C_ma - C_curr)
+    self.lagrange_mult *= self.lagrange_mult_param * tf.exp(C_curr)
+
     _, reconstr_loss, latent_loss, summary_str = sess.run((self.optimizer,
                                                            self.reconstr_loss,
                                                            self.latent_loss,
                                                            self.summary_op),
                                                           feed_dict={
                                                             self.x : xs,
-                                                            self.capacity : c
+                                                            self.lagrange_mult : self.lagrange_mult
                                                           })
     return reconstr_loss, latent_loss, summary_str
 

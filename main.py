@@ -12,18 +12,17 @@ from scipy.misc import imsave
 from model import VAE
 from data_manager import DataManager
 
-tf.app.flags.DEFINE_integer("epoch_size", 2000, "epoch size")
+tf.app.flags.DEFINE_integer("epoch_size", 200, "epoch size")
 tf.app.flags.DEFINE_integer("batch_size", 64, "batch size")
-tf.app.flags.DEFINE_float("gamma", 100.0, "gamma param for latent loss")
-tf.app.flags.DEFINE_float("capacity_limit", 20.0,
-                          "encoding capacity limit param for latent loss")
-tf.app.flags.DEFINE_integer("capacity_change_duration", 100000,
-                            "encoding capacity change duration")
+tf.app.flags.DEFINE_float("beta", 100.0, "beta param for latent loss")
 tf.app.flags.DEFINE_float("learning_rate", 1e-6, "learning rate")
 tf.app.flags.DEFINE_string("checkpoint_dir", "checkpoints", "checkpoint directory")
 tf.app.flags.DEFINE_string("log_file", "./log", "log file directory")
 tf.app.flags.DEFINE_boolean("training", True, "training or not")
 tf.app.flags.DEFINE_float("alpha", .99, "constraint moving average parameter")
+tf.app.flags.DEFINE_float("kappa", 0.1, "tolerance hyper-parameter")
+tf.app.flags.DEFINE_boolean("use_geco", True, "use geco fitter or use original fitter")
+tf.app.flags.DEFINE_float("lagrange_mult_param", .5, "multiplier by which to multiply exponentional of moving average when updating the lagrange multiplier")
 
 flags = tf.app.flags.FLAGS
 
@@ -44,14 +43,17 @@ def train(sess,
   
   # Training cycle
   for epoch in range(flags.epoch_size):
+    print("epoch: " + str(epoch))
     # Shuffle image indices -- TODO(JASMINE): why?
     random.shuffle(indices)
     
     avg_cost = 0.0
-    total_batch = n_samples // flags.batch_size
+    total_batch = n_samples // flags.batch_size // 1000
+    print(total_batch)
     
     # Loop over all batches
     for i in range(total_batch):
+      print("epoch: " + str(epoch) + "batch: " + str(i))
       # Generate image batch
       batch_indices = indices[flags.batch_size*i : flags.batch_size*(i+1)]
       batch_xs = manager.get_images(batch_indices)
@@ -142,11 +144,12 @@ def main(argv):
 
   sess = tf.Session()
   
-  model = VAE(gamma=flags.gamma,
-              capacity_limit=flags.capacity_limit,
-              capacity_change_duration=flags.capacity_change_duration,
+  model = VAE(beta=flags.beta,
               learning_rate=flags.learning_rate,
-              alpha = flags.alpha)
+              alpha = flags.alpha,
+              kappa = flags.kappa,
+              lagrange_mult_param = flags.lagrange_mult_param,
+              use_geco = flags.use_geco)
   
   sess.run(tf.global_variables_initializer())
 
