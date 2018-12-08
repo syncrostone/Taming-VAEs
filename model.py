@@ -30,7 +30,7 @@ class VAE(object):
                learning_rate=1e-6,
                alpha = 0.99,
                kappa = 0.1,
-               lagrange_mult_param = .5
+               lagrange_mult_param = .5,
                use_geco = True):
     self.beta = beta
     self.learning_rate = learning_rate
@@ -204,19 +204,20 @@ class VAE(object):
       
       # Loss term with beta scaling
       self.loss = self.reconstr_loss + self.beta* tf.abs(self.latent_loss)
-
-      reconstr_loss_summary_op = tf.summary.scalar('reconstr_loss', self.reconstr_loss)
-      latent_loss_summary_op   = tf.summary.scalar('latent_loss',   self.latent_loss)
-      self.summary_op = tf.summary.merge([reconstr_loss_summary_op, latent_loss_summary_op])
-
-      self.optimizer = tf.train.AdamOptimizer(
-        learning_rate=self.learning_rate).minimize(self.loss)
     if self.use_geco:
+      #Uses reconstruction error here.
+      self.reconstr_loss =tf.reduce_mean((tf.reduce_sum(tf.square(self.x - self.x_out), 1) - self.kappa**2))
       #How do I get the expectation instead of my current actual???
-      self.reconstr_loss = tf.reduce_sum(tf.square(self.x - self.x_out)) - self.kappa**2
-      #How do I get the expectation instead of my current actual???
-      latent_loss = 
-      self.loss = self.kl_divergence + self.lagrange_mult * self.reconstr_loss
+      kl_divergence = 
+      self.latent_loss = kl_divergence
+      self.loss = self.latent_loss + self.lagrange_mult * self.reconstr_loss
+    
+    reconstr_loss_summary_op = tf.summary.scalar('reconstr_loss', self.reconstr_loss)
+    latent_loss_summary_op   = tf.summary.scalar('latent_loss',   self.latent_loss)
+    self.summary_op = tf.summary.merge([reconstr_loss_summary_op, latent_loss_summary_op])
+    self.optimizer = tf.train.AdamOptimizer(
+      learning_rate=self.learning_rate).minimize(self.loss)
+
 
   def reconstruction_error(self, sess, xs):
     """Calculate reconstruction error as defined on page 8 of Taming VAEs"""
@@ -225,7 +226,7 @@ class VAE(object):
 
     reconstructed_z = sess.run(self.x_out, feed_dict = {self.x:xs})
     print(reconstructed_z)
-    return (tf.reduce_sum(tf.square(xs - reconstructed_z)) - self.kappa**2)
+    return (tf.reduce_mean(tf.reduce_sum(tf.square(xs - reconstructed_z), 1) - self.kappa**2))
     #reconstructed_z = self.generate(sess, z_sample)
     # return (tf.reduce_sum(tf.square(xs - reconstructed_z)) - self.kappa**2)
 
