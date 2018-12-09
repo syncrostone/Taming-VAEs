@@ -33,13 +33,12 @@ class VAE(object):
                lagrange_mult_param = .5,
                use_geco = True):
     self.beta = beta
+    self.use_geco = use_geco
     self.learning_rate = learning_rate
     self.alpha = alpha
     self.kappa = kappa
     self.lagrange_mult_param = .5
-    self.lagrange_mult = 1/beta # Initializing lagrangian as 1/beta since this cooresponds to 1/beta
 
-    
     # Create autoencoder network
     self._create_network()
     
@@ -189,34 +188,43 @@ class VAE(object):
       
       
   def _create_loss_optimizer(self):
-    if not self.use_geco:
-      # Reconstruction loss
-      reconstr_loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.x,
-                                                              logits=self.x_out_logit)
-      reconstr_loss = tf.reduce_sum(reconstr_loss, 1)
-      self.reconstr_loss = tf.reduce_mean(reconstr_loss)
+    self.lagrange = tf.Variable(1/self.beta, trainable=False)
+    self.lagrange = tf.Print(self.lagrange, [self.lagrange],"in graph, value of lagrange mult is: ")
+    with tf.variable_scope("opt"):
+      if not self.use_geco:
+        # Reconstruction loss
+        reconstr_loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.x,
+                                                                logits=self.x_out_logit)
+        reconstr_loss = tf.reduce_sum(reconstr_loss, 1)
+        self.reconstr_loss = tf.reduce_mean(reconstr_loss)
 
-      # Latent loss
-      latent_loss = -0.5 * tf.reduce_sum(1 + self.z_log_sigma_sq
-                                         - tf.square(self.z_mean)
-                                         - tf.exp(self.z_log_sigma_sq), 1)
-      self.latent_loss = tf.reduce_mean(latent_loss)
+        # Latent loss
+        latent_loss = -0.5 * tf.reduce_sum(1 + self.z_log_sigma_sq
+                                           - tf.square(self.z_mean)
+                                           - tf.exp(self.z_log_sigma_sq), 1)
+        self.latent_loss = tf.reduce_mean(latent_loss)
+        
+        # Loss term with beta scaling
+        self.loss = self.reconstr_loss + self.beta* tf.abs(self.latent_loss)
+      if self.use_geco:
+        #Uses reconstruction error here.
+        self.reconstr_loss =tf.reduce_mean((tf.reduce_sum(tf.square(self.x - self.x_out), 1) - self.kappa**2))
+        
+        #KL divergence
+        latent_loss = -0.5 * tf.reduce_sum(1 + self.z_log_sigma_sq
+                                           - tf.square(self.z_mean)
+                                           - tf.exp(self.z_log_sigma_sq), 1)
+        self.latent_loss = tf.reduce_mean(latent_loss)
+
+        self.lagrange = self.lagrange_mult
+        #Loss term with lagrange scaling
+        self.loss = self.latent_loss + self.lagrange * self.reconstr_loss
       
-      # Loss term with beta scaling
-      self.loss = self.reconstr_loss + self.beta* tf.abs(self.latent_loss)
-    if self.use_geco:
-      #Uses reconstruction error here.
-      self.reconstr_loss =tf.reduce_mean((tf.reduce_sum(tf.square(self.x - self.x_out), 1) - self.kappa**2))
-      #How do I get the expectation instead of my current actual???
-      kl_divergence = 
-      self.latent_loss = kl_divergence
-      self.loss = self.latent_loss + self.lagrange_mult * self.reconstr_loss
-    
-    reconstr_loss_summary_op = tf.summary.scalar('reconstr_loss', self.reconstr_loss)
-    latent_loss_summary_op   = tf.summary.scalar('latent_loss',   self.latent_loss)
-    self.summary_op = tf.summary.merge([reconstr_loss_summary_op, latent_loss_summary_op])
-    self.optimizer = tf.train.AdamOptimizer(
-      learning_rate=self.learning_rate).minimize(self.loss)
+      reconstr_loss_summary_op = tf.summary.scalar('reconstr_loss', self.reconstr_loss)
+      latent_loss_summary_op   = tf.summary.scalar('latent_loss',   self.latent_loss)
+      self.summary_op = tf.summary.merge([reconstr_loss_summary_op, latent_loss_summary_op])
+      self.optimizer = tf.train.AdamOptimizer(
+        learning_rate=self.learning_rate).minimize(self.loss)
 
 
   def reconstruction_error(self, sess, xs):
@@ -225,11 +233,39 @@ class VAE(object):
     #z_sample = self._sample_z(z_mean, z_log_sigma_sq)
 
     reconstructed_z = sess.run(self.x_out, feed_dict = {self.x:xs})
-    print(reconstructed_z)
     return (tf.reduce_mean(tf.reduce_sum(tf.square(xs - reconstructed_z), 1) - self.kappa**2))
     #reconstructed_z = self.generate(sess, z_sample)
     # return (tf.reduce_sum(tf.square(xs - reconstructed_z)) - self.kappa**2)
 
+  def geco_partial_fit(self, sess, xs, step):
+    """Train model as described in Taming VAEs."""
+    C_curr = self.reconstruction_error(sess, xs)
+    print("early C_curr" + str(C_curr.eval(session=sess)))
+    if step == 0:
+      print("step is 0, initializing")
+      self.lagrange_mult = 1.0/self.beta
+      self.C_ma = C_curr
+    else:
+      self.C_ma = self.alpha * self.C_ma + (1 - self.alpha)*C_curr
+    C_curr = C_curr + tf.stop_gradient(self.C_ma - C_curr)
+    print("C_curr" + str(C_curr.eval(session=sess)))
+    self.lagrange_mult = self.lagrange_mult * tf.exp(self.lagrange_mult_param * C_curr)
+
+    print("lagrange mult: " + str(self.lagrange_mult.eval(session=sess)))
+    self.optimizer = sess.run((self.optimizer),
+                              feed_dict = {
+                                self.x : xs,
+                                self.lagrange : self.lagrange_mult.eval(session = sess)
+                              })
+    _, reconstr_loss, latent_loss, summary_str = sess.run((self.optimizer,
+                                                           self.reconstr_loss,
+                                                           self.latent_loss,
+                                                           self.summary_op),
+                                                          feed_dict={
+                                                            self.x : xs,
+                                                            self.lagrange : self.lagrange_mult.eval(session = sess)
+                                                          })
+    return reconstr_loss, latent_loss, summary_str
     
   def partial_fit(self, sess, xs, step):
     """Train model based on mini-batch of input data.
@@ -242,33 +278,12 @@ class VAE(object):
                                                              self.latent_loss,
                                                              self.summary_op),
                                                             feed_dict={
-                                                              self.x : xs
+                                                              self.x : xs,
+                                                              self.lagrange_mult: self.lagrange_mult
                                                             })
       return reconstr_loss, latent_loss, summary_str
     if self.use_geco:
-      return geco_partial_fit(self, sess, xs, step)
-
-  def geco_partial_fit(self, sess, xs, step):
-    """Train model as described in Taming VAEs."""
-    C_curr = self.reconstruction_error(sess, xs)
-    if step == 0:
-      print("step is 0, initializing")
-      self.C_ma = C_curr
-    else:
-      self.C_ma = self.alpha * self.C_ma + (1 - self.alpha)*C_curr
-    C_curr = C_curr + tf.stop_gradient(self.C_ma - C_curr)
-    self.lagrange_mult *= self.lagrange_mult_param * tf.exp(C_curr)
-
-    _, reconstr_loss, latent_loss, summary_str = sess.run((self.optimizer,
-                                                           self.reconstr_loss,
-                                                           self.latent_loss,
-                                                           self.summary_op),
-                                                          feed_dict={
-                                                            self.x : xs,
-                                                            self.lagrange_mult : self.lagrange_mult
-                                                          })
-    return reconstr_loss, latent_loss, summary_str
-
+      return self.geco_partial_fit(sess, xs, step)
 
   def reconstruct(self, sess, xs):
     """ Reconstruct given data. """

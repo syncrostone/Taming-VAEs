@@ -5,6 +5,7 @@ from __future__ import print_function
 
 import numpy as np
 import tensorflow as tf
+from tensorflow.python import debug as tf_debug
 import random
 import os
 from scipy.misc import imsave
@@ -40,6 +41,13 @@ def train(sess,
   indices = list(range(n_samples))
 
   step = 0
+
+  variables_names = [v.name for v in tf.trainable_variables()]
+  values = sess.run(variables_names)
+  for k, v in zip(variables_names, values):
+      print("Variable: " + str(k))
+      print("Shape: "+ str(v.shape))
+      # print(v)
   
   # Training cycle
   for epoch in range(flags.epoch_size):
@@ -143,6 +151,7 @@ def main(argv):
   manager.load()
 
   sess = tf.Session()
+  # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
   
   model = VAE(beta=flags.beta,
               learning_rate=flags.learning_rate,
