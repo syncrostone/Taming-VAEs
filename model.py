@@ -37,7 +37,7 @@ class VAE(object):
     self.learning_rate = learning_rate
     self.alpha = alpha
     self.kappa = kappa
-    self.lagrange_mult_param = .5
+    self.lagrange_mult_param = lagrange_mult_param
 
     # Create autoencoder network
     self._create_network()
@@ -174,7 +174,10 @@ class VAE(object):
     
   def _create_network(self):
     # tf Graph input
-    self.x = tf.placeholder(tf.float32, shape=[None, 4096])
+    self.x = tf.placeholder(tf.float32, shape=[None, 4096], name = "x")
+    self.c_ma = tf.placeholder(tf.float32, name = "c_ma")
+    self.lambd = tf.placeholder(tf.float32, name = "lambd")
+
     
     with tf.variable_scope("vae"):
       self.z_mean, self.z_log_sigma_sq = self._create_recognition_network(self.x)
@@ -207,18 +210,18 @@ class VAE(object):
         # Loss term with beta scaling
         self.loss = self.reconstr_loss + self.beta* tf.abs(self.latent_loss)
       if self.use_geco:
-        #Uses reconstruction error here.
+        #Uses reconstruction error defined in paper on page 8 here.
         self.reconstr_loss =tf.reduce_mean((tf.reduce_sum(tf.square(self.x - self.x_out), 1) - self.kappa**2))
-        
+        self.updated_reconstr_loss = self.reconstr_loss + tf.stop_gradient(self.c_ma - self.reconstr_loss)
+
         #KL divergence
         latent_loss = -0.5 * tf.reduce_sum(1 + self.z_log_sigma_sq
                                            - tf.square(self.z_mean)
                                            - tf.exp(self.z_log_sigma_sq), 1)
         self.latent_loss = tf.reduce_mean(latent_loss)
 
-        self.lagrange = self.lagrange_mult
         #Loss term with lagrange scaling
-        self.loss = self.latent_loss + self.lagrange * self.reconstr_loss
+        self.loss = self.latent_loss + self.lambd * self.updated_reconstr_loss
       
       reconstr_loss_summary_op = tf.summary.scalar('reconstr_loss', self.reconstr_loss)
       latent_loss_summary_op   = tf.summary.scalar('latent_loss',   self.latent_loss)
@@ -229,41 +232,32 @@ class VAE(object):
 
   def reconstruction_error(self, sess, xs):
     """Calculate reconstruction error as defined on page 8 of Taming VAEs"""
-    #z_mean, z_log_sigma_sq = self.transform(sess,xs)
-    #z_sample = self._sample_z(z_mean, z_log_sigma_sq)
+    return  sess.run(self.reconstr_loss, feed_dict = {self.x:xs})
 
-    reconstructed_z = sess.run(self.x_out, feed_dict = {self.x:xs})
-    return (tf.reduce_mean(tf.reduce_sum(tf.square(xs - reconstructed_z), 1) - self.kappa**2))
-    #reconstructed_z = self.generate(sess, z_sample)
-    # return (tf.reduce_sum(tf.square(xs - reconstructed_z)) - self.kappa**2)
 
   def geco_partial_fit(self, sess, xs, step):
     """Train model as described in Taming VAEs."""
     C_curr = self.reconstruction_error(sess, xs)
-    print("early C_curr" + str(C_curr.eval(session=sess)))
     if step == 0:
       print("step is 0, initializing")
       self.lagrange_mult = 1.0/self.beta
       self.C_ma = C_curr
     else:
       self.C_ma = self.alpha * self.C_ma + (1 - self.alpha)*C_curr
-    C_curr = C_curr + tf.stop_gradient(self.C_ma - C_curr)
-    print("C_curr" + str(C_curr.eval(session=sess)))
-    self.lagrange_mult = self.lagrange_mult * tf.exp(self.lagrange_mult_param * C_curr)
-
-    print("lagrange mult: " + str(self.lagrange_mult.eval(session=sess)))
-    self.optimizer = sess.run((self.optimizer),
-                              feed_dict = {
-                                self.x : xs,
-                                self.lagrange : self.lagrange_mult.eval(session = sess)
-                              })
+    C_curr = sess.run(self.updated_reconstr_loss, feed_dict={self.x: xs,
+                                                            self.c_ma: self.C_ma})
+    #C_curr = C_curr + tf.stop_gradient(self.C_ma - C_curr)
+    #print("C_curr" + str(C_curr.eval(session=sess)))
+    self.lagrange_mult = self.lagrange_mult * np.exp(self.lagrange_mult_param * C_curr)
+    #print("lagrange mult: " + str(self.lagrange_mult.eval(session=sess)))
     _, reconstr_loss, latent_loss, summary_str = sess.run((self.optimizer,
                                                            self.reconstr_loss,
                                                            self.latent_loss,
                                                            self.summary_op),
                                                           feed_dict={
                                                             self.x : xs,
-                                                            self.lagrange : self.lagrange_mult.eval(session = sess)
+                                                            self.lambd : self.lagrange_mult,
+                                                            self.c_ma : self.C_ma
                                                           })
     return reconstr_loss, latent_loss, summary_str
     

@@ -23,7 +23,7 @@ tf.app.flags.DEFINE_boolean("training", True, "training or not")
 tf.app.flags.DEFINE_float("alpha", .99, "constraint moving average parameter")
 tf.app.flags.DEFINE_float("kappa", 0.1, "tolerance hyper-parameter")
 tf.app.flags.DEFINE_boolean("use_geco", True, "use geco fitter or use original fitter")
-tf.app.flags.DEFINE_float("lagrange_mult_param", .5, "multiplier by which to multiply exponentional of moving average when updating the lagrange multiplier")
+tf.app.flags.DEFINE_float("lagrange_mult_param", .00001, "multiplier by which to multiply exponentional of moving average when updating the lagrange multiplier")
 
 flags = tf.app.flags.FLAGS
 
@@ -151,7 +151,7 @@ def main(argv):
   manager.load()
 
   sess = tf.Session()
-  # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+  #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
   
   model = VAE(beta=flags.beta,
               learning_rate=flags.learning_rate,
