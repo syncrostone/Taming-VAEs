@@ -13,7 +13,7 @@ from scipy.misc import imsave
 from model import VAE
 from data_manager import DataManager
 
-tf.app.flags.DEFINE_integer("epoch_size", 200, "epoch size")
+tf.app.flags.DEFINE_integer("epoch_size", 2000, "epoch size")
 tf.app.flags.DEFINE_integer("batch_size", 64, "batch size")
 tf.app.flags.DEFINE_float("beta", 100.0, "beta param for latent loss")
 tf.app.flags.DEFINE_float("learning_rate", 1e-6, "learning rate")
@@ -21,7 +21,7 @@ tf.app.flags.DEFINE_string("checkpoint_dir", "checkpoints", "checkpoint director
 tf.app.flags.DEFINE_string("log_file", "./log", "log file directory")
 tf.app.flags.DEFINE_boolean("training", True, "training or not")
 tf.app.flags.DEFINE_float("alpha", .99, "constraint moving average parameter")
-tf.app.flags.DEFINE_float("kappa", 0.1, "tolerance hyper-parameter")
+tf.app.flags.DEFINE_float("kappa", 1, "tolerance hyper-parameter")
 tf.app.flags.DEFINE_boolean("use_geco", True, "use geco fitter or use original fitter")
 tf.app.flags.DEFINE_float("lagrange_mult_param", .00001, "multiplier by which to multiply exponentional of moving average when updating the lagrange multiplier")
 
@@ -41,23 +41,15 @@ def train(sess,
   indices = list(range(n_samples))
 
   step = 0
-
-  variables_names = [v.name for v in tf.trainable_variables()]
-  values = sess.run(variables_names)
-  for k, v in zip(variables_names, values):
-      print("Variable: " + str(k))
-      print("Shape: "+ str(v.shape))
-      # print(v)
   
   # Training cycle
   for epoch in range(flags.epoch_size):
     print("epoch: " + str(epoch))
-    # Shuffle image indices -- TODO(JASMINE): why?
+    # Shuffle image indices
     random.shuffle(indices)
     
     avg_cost = 0.0
-    total_batch = n_samples // flags.batch_size // 1000
-    print(total_batch)
+    total_batch = n_samples // flags.batch_size
     
     # Loop over all batches
     for i in range(total_batch):
